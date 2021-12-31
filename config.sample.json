@@ -1,0 +1,4 @@
+{
+  "token": "0000000000:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "redis": "redis://redis:6379"
+}
