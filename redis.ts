@@ -55,6 +55,25 @@ async function get(k: string): Promise<string | undefined> {
     return v;
 }
 
+async function getRandomSticker(): Promise<string | undefined> {
+    const welcome_sticker_key = "welcome_stickers"
+    const get = util.promisify<string, string>(client.srandmember.bind(client));
+    const exist_sticker = await exists(welcome_sticker_key);
+
+    if(!exist_sticker) { return undefined }
+
+    let file_id: string | null;
+
+    try {
+        file_id = await get(welcome_sticker_key);
+    }
+    catch (e) {
+        log("silly", "getRandomSticker(): err %s", e);
+        return undefined;
+    }
+    return file_id;
+}
+
 async function set(k: string, v: string, ttl?: number): Promise<void> {
     const set = util.promisify(client.set.bind(client)) as any;
     try {
@@ -101,6 +120,7 @@ export = {
     ping,
     get,
     set,
+    getRandomSticker,
     del,
     exists,
 };

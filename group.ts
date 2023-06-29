@@ -138,6 +138,7 @@ class Group {
             return;
         }
         await this.send(await this.render(await this.getTemplate("onpass"), user), msg.message_id);
+        await this.sendWelcomeSticker()
     }
 
     private async onFail(user: TelegramBot.User): Promise<void> {
@@ -484,6 +485,14 @@ class Group {
 
     private async send(html: string, reply?: number): Promise<number> {
         return bot.send(this.id, html, reply);
+    }
+
+    private async sendWelcomeSticker(): Promise<void> {
+        let sticker = await redis.getRandomSticker();
+        if(!sticker) sticker = config.get("welcome_sticker", 'CAACAgUAAxkBAAJFM2SdfkQpM6zSylE1XnGQ1ZR6RbmHAALtBQAC-MbFCoZ6Voz2yTOjLwQ');
+        if(sticker !== undefined) {
+            await bot.sendSticker(this.id, sticker);
+        }
     }
 
     private async delMsg(msg: number): Promise<boolean> {

@@ -101,6 +101,23 @@ async function send(chat: number, html: string, reply?: number): Promise<number>
     return m.message_id;
 }
 
+async function sendSticker(chat: number, sticker: string, reply?: number): Promise<number> {
+    const t = Date.now();
+    let m: TelegramBotAPI.Message;
+    try {
+        m = await api.sendSticker(chat, sticker, {
+            reply_to_message_id: reply,
+        });
+    } catch (e) {
+        const d = (Date.now() - t).toString() + "ms";
+        log("warn", "sendSticker(chat=%j, sticker=%j, reply=%j): %s err %s", chat, sticker, reply, d, e);
+        return 0;
+    }
+    const d = (Date.now() - t).toString() + "ms";
+    log("verbose", "sendSticker(chat=%j, sticker=%j, reply=%j): %s ok %j", chat, sticker, reply, d, m.message_id);
+    return m.message_id;
+}
+
 async function del(chat: number, msg: number): Promise<boolean> {
     const t = Date.now();
     let r: boolean;
@@ -201,6 +218,7 @@ export = {
     getMe,
     parseCommand,
     send,
+    sendSticker,
     del,
     mute,
     ban,
