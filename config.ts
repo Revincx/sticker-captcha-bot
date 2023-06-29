@@ -7,6 +7,9 @@ import npmlog from "npmlog";
 let config: any;
 
 async function init(): Promise<void> {
+    if(process.env.token) {
+        return npmlog.info("config", "load from env, skip file read")
+    }
     if (process.argv.length < 3) {
         npmlog.error("sticker-captcha-bot", `Usage: %j <config>`, process.argv[1]);
         process.exit(1);
@@ -15,7 +18,7 @@ async function init(): Promise<void> {
     try {
         const file = await fs.readFile(filename, "utf-8");
         config = JSON.parse(file);
-    } catch (e) {
+    } catch (e: any) {
         npmlog.info("config", "load(%j): err %s", filename, e.message);
         process.exit(1);
     }
@@ -24,6 +27,9 @@ async function init(): Promise<void> {
 }
 
 function get<T>(key: string, fallback?: T): T {
+    if (process.env[key] !== undefined) {
+        return process.env[key] as T;
+    }
     return config[key] !== undefined ? config[key] : fallback;
 }
 
