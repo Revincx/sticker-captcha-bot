@@ -4,7 +4,7 @@ import fs from "fs/promises";
 
 import npmlog from "npmlog";
 
-let config: any;
+let config: any = {};
 
 async function init(): Promise<void> {
     if(process.env.token) {
