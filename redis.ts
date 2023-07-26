@@ -1,9 +1,7 @@
 import "source-map-support/register";
 
-import util from "util";
-
 import npmlog from "npmlog";
-import redis from "redis";
+import { Redis } from "ioredis";
 
 import config from "./config";
 
@@ -19,20 +17,19 @@ function log(level: npmlog.LogLevels, msg: string, ...args: any[]): void {
     npmlog[level]("redis", msg, ...args);
 }
 
-let client: redis.RedisClient;
+let client: Redis;
 
 async function init(): Promise<void> {
-    client = redis.createClient(config.get("redis"));
+    client = new Redis(config.get("REDIS_URL"));
     if (!await ping()) {
         process.exit(1);
     }
 }
 
 async function ping(): Promise<boolean> {
-    const ping = util.promisify(client.ping.bind(client)) as any;
     let r;
     try {
-        r = await ping();
+        r = await client.ping();
     } catch (e) {
         log("error", "ping(): err %s", e);
         return false;
@@ -42,10 +39,9 @@ async function ping(): Promise<boolean> {
 }
 
 async function get(k: string): Promise<string | undefined> {
-    const get = util.promisify(client.get.bind(client));
     let r: string | null;
     try {
-        r = await get(k);
+        r = await client.get(k);
     } catch (e) {
         log("silly", "get(%s): err %s", k, e);
         return undefined;
@@ -57,15 +53,14 @@ async function get(k: string): Promise<string | undefined> {
 
 async function getRandomSticker(): Promise<string | undefined> {
     const welcome_sticker_key = "welcome_stickers"
-    const get = util.promisify<string, string>(client.srandmember.bind(client));
     const exist_sticker = await exists(welcome_sticker_key);
 
     if(!exist_sticker) { return undefined }
 
-    let file_id: string | null;
+    let file_id: string | undefined;
 
     try {
-        file_id = await get(welcome_sticker_key);
+        file_id = await client.srandmember(welcome_sticker_key) || undefined;
     }
     catch (e) {
         log("silly", "getRandomSticker(): err %s", e);
@@ -75,12 +70,11 @@ async function getRandomSticker(): Promise<string | undefined> {
 }
 
 async function set(k: string, v: string, ttl?: number): Promise<void> {
-    const set = util.promisify(client.set.bind(client)) as any;
     try {
         if (ttl === undefined) {
-            set(k, v);
+            client.set(k, v);
         } else {
-            set(k, v, "EX", ttl);
+            client.set(k, v, "EX", ttl);
         }
     } catch (e) {
         log("silly", "set(%s, %j, ttl=%j): err %s", k, v, ttl, e);
@@ -90,10 +84,9 @@ async function set(k: string, v: string, ttl?: number): Promise<void> {
 }
 
 async function del(k: string): Promise<void> {
-    const del = util.promisify(client.del.bind(client)) as any;
     let r;
     try {
-        r = await del(k);
+        r = await client.del(k);
     } catch (e) {
         log("silly", "del(%s): err %s", k, e);
         return;
@@ -102,10 +95,9 @@ async function del(k: string): Promise<void> {
 }
 
 async function exists(k: string): Promise<boolean> {
-    const exists = util.promisify(client.exists.bind(client)) as any;
     let r;
     try {
-        r = await exists(k);
+        r = await client.exists(k);
     } catch (e) {
         log("silly", "exists(%s): err %s", k, e);
         return false;
