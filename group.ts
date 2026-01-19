@@ -76,7 +76,7 @@ class Group {
             return true;
         }
         if (m.new_chat_members !== undefined) {
-            await Promise.all(m.new_chat_members.map((u) => this.onJoin(m, u)));
+            await Promise.all(m.new_chat_members.filter((u) => !u.is_bot).map((u) => this.onJoin(m, u)));
             return true;
         }
         return false;
