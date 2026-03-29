@@ -69,12 +69,12 @@ class Group {
         if (!await this.existsKey("enabled")) {
             return false;
         }
-        if (await this.getRole(bot.getMe().id) !== "admin") {
-            await this.delKey("enabled");
-            await this.send(await this.format("bot.angry"));
-            await this.leave();
-            return true;
-        }
+        // if (await this.getRole(bot.getMe().id) !== "admin") {
+        //     await this.delKey("enabled");
+        //     await this.send(await this.format("bot.angry"));
+        //     await this.leave();
+        //     return true;
+        // }
         if (m.new_chat_members !== undefined) {
             await Promise.all(m.new_chat_members.map((u) => this.onJoin(m, u)));
             return true;
@@ -90,6 +90,7 @@ class Group {
 
         npmlog.info("group", "(group=%j).onjoin(msg=%j, user=%j) start", this.id, msg.message_id, user.id);
         await this.setKey(`user:${user.id}:pending`, "true");
+        await this.restrictToStickers(user.id);
         const h = await this.send(await this.render(await this.getTemplate("onjoin"), user), msg.message_id);
 
         const passed = await Promise.race([
@@ -129,6 +130,7 @@ class Group {
         }
         npmlog.info("group", "(group=%j).onpass(msg=%j, user=%j)", this.id, msg.message_id, user.id);
         await this.delKey(`user:${user.id}:pending`);
+        await this.restoreMessaging(user.id);
         const resolve = this.resolvers.get(user.id);
         if (resolve !== undefined) {
             resolve(true);
@@ -501,6 +503,14 @@ class Group {
 
     private async mute(user: number): Promise<boolean> {
         return bot.mute(this.id, user);
+    }
+
+    private async restrictToStickers(user: number): Promise<boolean> {
+        return bot.allowStickersOnly(this.id, user);
+    }
+
+    private async restoreMessaging(user: number): Promise<boolean> {
+        return bot.allowAllMessages(this.id, user);
     }
 
     private async ban(user: number): Promise<void> {

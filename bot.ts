@@ -138,7 +138,9 @@ async function mute(chat: number, user: number): Promise<boolean> {
     let r: boolean;
     try {
         r = await api.restrictChatMember(chat, user as any, {
-            can_send_messages: false,
+            permissions: {
+                can_send_messages: false,
+            }
         });
     } catch (e) {
         const d = (Date.now() - t).toString() + "ms";
@@ -150,11 +152,59 @@ async function mute(chat: number, user: number): Promise<boolean> {
     return r;
 }
 
+async function allowStickersOnly(chat: number, user: number): Promise<boolean> {
+    const t = Date.now();
+    let r: boolean;
+    try {
+        r = await api.restrictChatMember(chat, user, {
+            can_send_messages: false,
+            can_send_audios: false,
+            can_send_documents: false,
+            can_send_photos: false,
+            can_send_videos: false,
+            can_send_video_notes: false,
+            can_send_voice_notes: false,
+            can_send_polls: false,
+            can_add_web_page_previews: false,
+            can_send_other_messages: true,
+            use_independent_chat_permissions: true
+        });
+    } catch (e) {
+        const d = (Date.now() - t).toString() + "ms";
+        log("warn", "allowStickersOnly(chat=%j, user=%j): %s err %s", chat, user, d, e);
+        return false;
+    }
+    const d = (Date.now() - t).toString() + "ms";
+    log("verbose", "allowStickersOnly(chat=%j, user=%j): %s ok %j", chat, user, d, r);
+    return r;
+}
+
+async function allowAllMessages(chat: number, user: number): Promise<boolean> {
+    const t = Date.now();
+    let r: boolean;
+    try {
+        r = await api.restrictChatMember(chat, user, {
+            can_send_messages: true,
+            can_send_other_messages: true,
+            can_add_web_page_previews: true,
+            can_send_polls: true,
+            use_independent_chat_permissions: false
+        });
+    } catch (e) {
+        const d = (Date.now() - t).toString() + "ms";
+        log("warn", "allowAllMessages(chat=%j, user=%j): %s err %s", chat, user, d, e);
+        return false;
+    }
+    const d = (Date.now() - t).toString() + "ms";
+    log("verbose", "allowAllMessages(chat=%j, user=%j): %s ok %j", chat, user, d, r);
+    return r;
+}
+
 async function ban(chat: number, user: number): Promise<boolean> {
     const t = Date.now();
     let r: boolean;
     try {
-        r = await api.kickChatMember(chat, user as any);
+        r = await api.banChatMember(chat, user as any);
     } catch (e) {
         const d = (Date.now() - t).toString() + "ms";
         log("warn", "ban(chat=%j, user=%j): %s err %s", chat, user, d, e);
@@ -221,6 +271,8 @@ export = {
     sendSticker,
     del,
     mute,
+    allowStickersOnly,
+    allowAllMessages,
     ban,
     unban,
     getChatMember,
