@@ -1,6 +1,7 @@
 import "source-map-support/register";
 
 import npmlog from "npmlog";
+import TelegramBotAPI from "node-telegram-bot-api";
 
 import bot from "./bot";
 import config from "./config";
@@ -22,29 +23,23 @@ async function sleep(time: number): Promise<void> {
     await redis.init();
     await bot.init();
 
-    let lastUpdateID = -1;
-    while (true) {
-        try {
-            const updates = await bot.getAPI().getUpdates({
-                allowed_updates: ["message", "callback_query"],
-                offset: lastUpdateID + 1,
-                timeout: 50,
-            });
+    const api = bot.getAPI();
 
-            for (const upd of updates) {
-                lastUpdateID = upd.update_id;
-                if (upd.message !== undefined) {
-                    const m = upd.message;
-                    const g = Group.get(m.chat.id);
-                    g.handleMessage(m).catch(() => undefined);
-                }
-                if (upd.callback_query?.message?.chat.id !== undefined) {
-                    const q = upd.callback_query;
-                    const qm = q.message as NonNullable<typeof q.message>;
-                    const g = Group.get(qm.chat.id);
-                    g.handleCallbackQuery(q).catch(() => undefined);
-                }
-            }
-        } catch {}
-    }
+    api.on("message", (m: TelegramBotAPI.Message) => {
+        const g = Group.get(m.chat.id);
+        g.handleMessage(m).catch(() => undefined);
+    });
+
+    api.on("callback_query", (q: TelegramBotAPI.CallbackQuery) => {
+        const chatId = q.message?.chat.id;
+        if (chatId === undefined) {
+            return;
+        }
+        const g = Group.get(chatId);
+        g.handleCallbackQuery(q).catch(() => undefined);
+    });
+
+    api.on("polling_error", (e: Error) => {
+        npmlog.warn("bot", "polling_error: %s", e.message);
+    });
 })();

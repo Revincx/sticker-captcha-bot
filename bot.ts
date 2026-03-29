@@ -56,6 +56,13 @@ function getErrorMessage(e: unknown): string {
 
 async function init(): Promise<void> {
     api = new TelegramBotAPI(config.get("token", ""), {
+        polling: {
+            autoStart: false,
+            params: {
+                allowed_updates: ["message", "callback_query"],
+                timeout: 50,
+            },
+        },
         request: {
             url: undefined as any as string,
             timeout: config.get("timeout"),
@@ -64,6 +71,7 @@ async function init(): Promise<void> {
     });
     try {
         me = await api.getMe();
+        await api.startPolling();
     } catch (e) {
         log("error", "init(): err %s", e);
         process.exit(1);
