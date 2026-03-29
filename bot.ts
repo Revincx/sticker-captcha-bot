@@ -27,6 +27,32 @@ function escapeHTML(s: string): string {
 
 let api: TelegramBotAPI;
 let me: TelegramBotAPI.User;
+const deletedMessages = new Map<string, number>();
+const clearedReplyMarkups = new Map<string, number>();
+
+function getMessageKey(chat: number, msg: number): string {
+    return `${chat}:${msg}`;
+}
+
+function remember(map: Map<string, number>, key: string, ttl: number = 300e3): void {
+    map.set(key, Date.now() + ttl);
+}
+
+function hasFreshMark(map: Map<string, number>, key: string): boolean {
+    const exp = map.get(key);
+    if (exp === undefined) {
+        return false;
+    }
+    if (exp < Date.now()) {
+        map.delete(key);
+        return false;
+    }
+    return true;
+}
+
+function getErrorMessage(e: unknown): string {
+    return e instanceof Error ? e.message : String(e);
+}
 
 async function init(): Promise<void> {
     api = new TelegramBotAPI(config.get("token", ""), {
@@ -83,16 +109,26 @@ function parseCommand(m: TelegramBotAPI.Message): [cmd?: string, arg?: string] {
 }
 
 async function send(chat: number, html: string, reply?: number, opts: TelegramBotAPI.SendMessageOptions = {}): Promise<number> {
+    const key = reply === undefined ? undefined : getMessageKey(chat, reply);
+    if (key !== undefined && hasFreshMark(deletedMessages, key)) {
+        reply = undefined;
+    }
     const t = Date.now();
     let m: TelegramBotAPI.Message;
     try {
         m = await api.sendMessage(chat, html, {
             ...opts,
+            allow_sending_without_reply: true,
             disable_web_page_preview: true,
             parse_mode: "HTML",
             reply_to_message_id: reply,
         });
     } catch (e) {
+        const msg = getErrorMessage(e);
+        if (reply !== undefined && msg.includes("message to be replied not found")) {
+            log("verbose", "send(chat=%j, html=(...), reply=%j): fallback without reply target", chat, reply);
+            return send(chat, html, undefined, opts);
+        }
         const d = (Date.now() - t).toString() + "ms";
         log("warn", "send(chat=%j, html=(...), reply=%j): %s err %s", chat, reply, d, e);
         return 0;
@@ -120,16 +156,30 @@ async function sendSticker(chat: number, sticker: string, reply?: number): Promi
 }
 
 async function del(chat: number, msg: number): Promise<boolean> {
+    if (msg === 0) {
+        return false;
+    }
+    const key = getMessageKey(chat, msg);
+    if (hasFreshMark(deletedMessages, key)) {
+        return false;
+    }
     const t = Date.now();
     let r: boolean;
     try {
         r = await api.deleteMessage(chat, msg as any);
     } catch (e) {
+        const err = getErrorMessage(e);
+        if (err.includes("message to delete not found")) {
+            remember(deletedMessages, key);
+            log("verbose", "del(chat=%j, msg=%j): already deleted", chat, msg);
+            return false;
+        }
         const d = (Date.now() - t).toString() + "ms";
         log("warn", "del(chat=%j, msg=%j): %s err %s", chat, msg, d, e);
         return false;
     }
     const d = (Date.now() - t).toString() + "ms";
+    remember(deletedMessages, key);
     log("verbose", "del(chat=%j, msg=%j): %s ok %j", chat, msg, d, r);
     return r;
 }
@@ -247,6 +297,10 @@ async function answerCallbackQuery(id: string, text?: string): Promise<boolean> 
 }
 
 async function clearReplyMarkup(chat: number, msg: number): Promise<boolean> {
+    const key = getMessageKey(chat, msg);
+    if (hasFreshMark(deletedMessages, key) || hasFreshMark(clearedReplyMarkups, key)) {
+        return false;
+    }
     const t = Date.now();
     let r: TelegramBotAPI.Message | boolean;
     try {
@@ -255,11 +309,23 @@ async function clearReplyMarkup(chat: number, msg: number): Promise<boolean> {
             { chat_id: chat, message_id: msg },
         );
     } catch (e) {
+        const err = getErrorMessage(e);
+        if (err.includes("message is not modified")) {
+            remember(clearedReplyMarkups, key);
+            log("verbose", "clearReplyMarkup(chat=%j, msg=%j): already cleared", chat, msg);
+            return false;
+        }
+        if (err.includes("message to edit not found")) {
+            remember(deletedMessages, key);
+            log("verbose", "clearReplyMarkup(chat=%j, msg=%j): message already deleted", chat, msg);
+            return false;
+        }
         const d = (Date.now() - t).toString() + "ms";
         log("warn", "clearReplyMarkup(chat=%j, msg=%j): %s err %s", chat, msg, d, e);
         return false;
     }
     const d = (Date.now() - t).toString() + "ms";
+    remember(clearedReplyMarkups, key);
     log("verbose", "clearReplyMarkup(chat=%j, msg=%j): %s ok %j", chat, msg, d, r);
     return true;
 }

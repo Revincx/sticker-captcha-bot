@@ -179,7 +179,7 @@ class Group {
             return;
         }
 
-        if (!await this.existsKey("verbose")) {
+        if (!await this.existsKey("verbose") && await this.shouldDeleteJoinMessage(user.id, msg.message_id)) {
             await this.delMsg(msg.message_id);
         }
         await this.onFail(user);
@@ -199,6 +199,7 @@ class Group {
         }
         if (await this.existsKey("quiet")) {
             await this.delMsg(msg.message_id);
+            await this.clearTrackedMessages(user.id);
             return;
         }
         await this.send(await this.render(await this.getTemplate("onpass"), user), msg.message_id);
@@ -672,6 +673,11 @@ class Group {
     private async clearTrackedMessages(user: number): Promise<void> {
         await this.delKey(`user:${user}:join_msg`);
         await this.delKey(`user:${user}:messages`);
+    }
+
+    private async shouldDeleteJoinMessage(user: number, msg: number): Promise<boolean> {
+        const joinMsg = await this.getKey(`user:${user}:join_msg`);
+        return joinMsg === msg.toString();
     }
 
     private async mute(user: number): Promise<boolean> {
