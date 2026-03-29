@@ -49,6 +49,9 @@ class Group {
                 await this.delKey("enabled");
             }
         }
+        if (await this.handleServiceMessage(m)) {
+            return;
+        }
         if (await this.handleVerification(m)) {
             return;
         }
@@ -57,8 +60,44 @@ class Group {
         }
     }
 
+    public async handleCallbackQuery(q: TelegramBot.CallbackQuery): Promise<void> {
+        const data = q.data;
+        const msg = q.message;
+        if (data === undefined || msg === undefined) {
+            return;
+        }
+        const [scope, action, userText] = data.split(":");
+        if (scope !== "verify" || (action !== "pass" && action !== "ban")) {
+            return;
+        }
+        if (!await this.checkCallbackFromAdmin(q)) {
+            return;
+        }
+        const user = Number.parseInt(userText);
+        if (Number.isNaN(user)) {
+            await bot.answerCallbackQuery(q.id, await this.format("callback.bad_data"));
+            return;
+        }
+        await this.clearPromptKeyboard(user, msg.message_id);
+        if (!await this.existsKey(`user:${user}:pending`)) {
+            await bot.answerCallbackQuery(q.id, await this.format("callback.expired"));
+            return;
+        }
+        const targetUser = msg.reply_to_message?.new_chat_members?.find((u) => u.id === user)
+            || msg.reply_to_message?.from
+            || { id: user, first_name: user.toString(), is_bot: false };
+        if (action === "pass") {
+            await bot.answerCallbackQuery(q.id, await this.format("callback.pass"));
+            await this.onPassByAdmin(msg, targetUser);
+            return;
+        }
+        await bot.answerCallbackQuery(q.id, await this.format("callback.ban"));
+        await this.onBanByAdmin(targetUser);
+    }
+
     private async handleVerification(m: TelegramBot.Message): Promise<boolean> {
         if (await this.existsKey(`user:${m.from?.id}:pending`)) {
+            await this.trackPendingMessage(m.from?.id as number, m.message_id);
             if (m.sticker !== undefined) {
                 await this.onPass(m, m.from as TelegramBot.User);
             } else {
@@ -82,6 +121,20 @@ class Group {
         return false;
     }
 
+    private async handleServiceMessage(m: TelegramBot.Message): Promise<boolean> {
+        const user = m.left_chat_member;
+        if (user === undefined) {
+            return false;
+        }
+        await this.delKey(`user:${user.id}:role`);
+        if (!await this.existsKey(`user:${user.id}:cleanup_remove_msg`)) {
+            return false;
+        }
+        await this.delKey(`user:${user.id}:cleanup_remove_msg`);
+        await this.delMsg(m.message_id);
+        return true;
+    }
+
     private async onJoin(msg: TelegramBot.Message, user: TelegramBot.User): Promise<void> {
         if (await this.existsKey(`user:${user.id}:pending`)) {
             npmlog.info("group", "(group=%j).onjoin(msg=%j, user=%j) dup", this.id, msg.message_id, user.id);
@@ -90,8 +143,16 @@ class Group {
 
         npmlog.info("group", "(group=%j).onjoin(msg=%j, user=%j) start", this.id, msg.message_id, user.id);
         await this.setKey(`user:${user.id}:pending`, "true");
+        await this.setKey(`user:${user.id}:join_msg`, msg.message_id.toString());
         await this.restrictToStickers(user.id);
-        const h = await this.send(await this.render(await this.getTemplate("onjoin"), user), msg.message_id);
+        const h = await this.send(
+            await this.render(await this.getTemplate("onjoin"), user),
+            msg.message_id,
+            await this.getVerificationButtons(user.id),
+        );
+        if (h !== 0) {
+            await this.setKey(`user:${user.id}:prompt`, h.toString());
+        }
 
         const passed = await Promise.race([
             this.sleep(false),
@@ -130,6 +191,7 @@ class Group {
         }
         npmlog.info("group", "(group=%j).onpass(msg=%j, user=%j)", this.id, msg.message_id, user.id);
         await this.delKey(`user:${user.id}:pending`);
+        await this.clearPromptKeyboard(user.id, msg.message_id);
         await this.restoreMessaging(user.id);
         const resolve = this.resolvers.get(user.id);
         if (resolve !== undefined) {
@@ -141,6 +203,22 @@ class Group {
         }
         await this.send(await this.render(await this.getTemplate("onpass"), user), msg.message_id);
         await this.sendWelcomeSticker()
+        await this.clearTrackedMessages(user.id);
+    }
+
+    private async onPassByAdmin(msg: TelegramBot.Message, user: TelegramBot.User): Promise<void> {
+        if (!await this.existsKey(`user:${user.id}:pending`)) {
+            return;
+        }
+        npmlog.info("group", "(group=%j).onPassByAdmin(msg=%j, user=%j)", this.id, msg.message_id, user.id);
+        await this.delKey(`user:${user.id}:pending`);
+        await this.clearPromptKeyboard(user.id, msg.message_id);
+        await this.restoreMessaging(user.id);
+        const resolve = this.resolvers.get(user.id);
+        if (resolve !== undefined) {
+            resolve(true);
+        }
+        await this.clearTrackedMessages(user.id);
     }
 
     private async onFail(user: TelegramBot.User): Promise<void> {
@@ -149,6 +227,7 @@ class Group {
         }
         npmlog.info("group", "(group=%j).onfail(user=%j)", this.id, user.id);
         await this.delKey(`user:${user.id}:pending`);
+        await this.clearPromptKeyboard(user.id);
         const resolve = this.resolvers.get(user.id);
         if (resolve !== undefined) {
             resolve(false);
@@ -159,10 +238,27 @@ class Group {
         }
         const f = await this.send(await this.render(await this.getTemplate("onfail"), user));
         if (await this.existsKey("verbose")) {
+            await this.clearTrackedMessages(user.id);
             return;
         }
         await this.sleep();
         await this.delMsg(f);
+        await this.clearTrackedMessages(user.id);
+    }
+
+    private async onBanByAdmin(user: TelegramBot.User): Promise<void> {
+        if (!await this.existsKey(`user:${user.id}:pending`)) {
+            return;
+        }
+        npmlog.info("group", "(group=%j).onBanByAdmin(user=%j)", this.id, user.id);
+        await this.delKey(`user:${user.id}:pending`);
+        await this.clearPromptKeyboard(user.id);
+        const resolve = this.resolvers.get(user.id);
+        if (resolve !== undefined) {
+            resolve(false);
+        }
+        await this.deleteTrackedMessages(user.id);
+        await this.ban(user.id);
     }
 
     private async handleCommand(m: TelegramBot.Message): Promise<boolean> {
@@ -384,6 +480,24 @@ class Group {
         return false;
     }
 
+    private async checkCallbackFromAdmin(q: TelegramBot.CallbackQuery): Promise<boolean> {
+        const chat = q.message?.chat;
+        const from = q.from?.id;
+        if (chat === undefined || from === undefined) {
+            await bot.answerCallbackQuery(q.id, await this.format("callback.bad_data"));
+            return false;
+        }
+        if (chat.type === "private") {
+            await bot.answerCallbackQuery(q.id, await this.format("cmd.not_in_group"));
+            return false;
+        }
+        if (await this.getRole(from) !== "admin") {
+            await bot.answerCallbackQuery(q.id, await this.format("callback.not_admin"));
+            return false;
+        }
+        return true;
+    }
+
     private async sleep(): Promise<void>;
     private async sleep<T>(res: T): Promise<T>;
     private async sleep(res?: any): Promise<any> {
@@ -485,8 +599,8 @@ class Group {
         return redis.exists(`group:${this.id}:${key}`);
     }
 
-    private async send(html: string, reply?: number): Promise<number> {
-        return bot.send(this.id, html, reply);
+    private async send(html: string, reply?: number, keyboard?: TelegramBot.InlineKeyboardMarkup): Promise<number> {
+        return bot.send(this.id, html, reply, keyboard === undefined ? {} : { reply_markup: keyboard });
     }
 
     private async sendWelcomeSticker(): Promise<void> {
@@ -499,6 +613,65 @@ class Group {
 
     private async delMsg(msg: number): Promise<boolean> {
         return bot.del(this.id, msg);
+    }
+
+    private async getVerificationButtons(user: number): Promise<TelegramBot.InlineKeyboardMarkup> {
+        return {
+            inline_keyboard: [[
+                {
+                    text: await this.format("button.pass"),
+                    callback_data: `verify:pass:${user}`,
+                },
+                {
+                    text: await this.format("button.ban"),
+                    callback_data: `verify:ban:${user}`,
+                },
+            ]],
+        };
+    }
+
+    private async clearPromptKeyboard(user: number, fallbackMsg?: number): Promise<void> {
+        const prompt = await this.getKey(`user:${user}:prompt`);
+        const msg = Number.parseInt(prompt as string);
+        const target = Number.isNaN(msg) ? fallbackMsg : msg;
+        if (target !== undefined) {
+            await bot.clearReplyMarkup(this.id, target);
+        }
+        await this.delKey(`user:${user}:prompt`);
+    }
+
+    private async trackPendingMessage(user: number, msg: number): Promise<void> {
+        const key = `user:${user}:messages`;
+        const tracked = await this.getKey(key);
+        const messages = new Set((tracked || "").split(",").filter((s) => s.length !== 0));
+        messages.add(msg.toString());
+        await this.setKey(key, Array.from(messages).join(","));
+    }
+
+    private async deleteTrackedMessages(user: number): Promise<void> {
+        const joinMsg = await this.getKey(`user:${user}:join_msg`);
+        const tracked = await this.getKey(`user:${user}:messages`);
+        const messages = new Set<string>();
+        if (joinMsg !== undefined) {
+            messages.add(joinMsg);
+        }
+        for (const msg of (tracked || "").split(",")) {
+            if (msg.length !== 0) {
+                messages.add(msg);
+            }
+        }
+        for (const msg of messages) {
+            const id = Number.parseInt(msg);
+            if (!Number.isNaN(id)) {
+                await this.delMsg(id);
+            }
+        }
+        await this.clearTrackedMessages(user);
+    }
+
+    private async clearTrackedMessages(user: number): Promise<void> {
+        await this.delKey(`user:${user}:join_msg`);
+        await this.delKey(`user:${user}:messages`);
     }
 
     private async mute(user: number): Promise<boolean> {
@@ -514,11 +687,13 @@ class Group {
     }
 
     private async ban(user: number): Promise<void> {
+        await this.setKey(`user:${user}:cleanup_remove_msg`, "true", 60);
         await bot.ban(this.id, user);
         await this.delKey(`user:${user}:role`);
     }
 
     private async kick(user: number): Promise<void> {
+        await this.setKey(`user:${user}:cleanup_remove_msg`, "true", 60);
         await bot.ban(this.id, user);
         await this.delKey(`user:${user}:role`);
         await bot.unban(this.id, user);

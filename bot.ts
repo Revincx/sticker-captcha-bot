@@ -82,11 +82,12 @@ function parseCommand(m: TelegramBotAPI.Message): [cmd?: string, arg?: string] {
     return [c, text.slice(p + 1).trim()];
 }
 
-async function send(chat: number, html: string, reply?: number): Promise<number> {
+async function send(chat: number, html: string, reply?: number, opts: TelegramBotAPI.SendMessageOptions = {}): Promise<number> {
     const t = Date.now();
     let m: TelegramBotAPI.Message;
     try {
         m = await api.sendMessage(chat, html, {
+            ...opts,
             disable_web_page_preview: true,
             parse_mode: "HTML",
             reply_to_message_id: reply,
@@ -230,6 +231,39 @@ async function unban(chat: number, user: number): Promise<boolean> {
     return r;
 }
 
+async function answerCallbackQuery(id: string, text?: string): Promise<boolean> {
+    const t = Date.now();
+    let r: boolean;
+    try {
+        r = await api.answerCallbackQuery(id, text === undefined ? {} : { text });
+    } catch (e) {
+        const d = (Date.now() - t).toString() + "ms";
+        log("warn", "answerCallbackQuery(id=%j): %s err %s", id, d, e);
+        return false;
+    }
+    const d = (Date.now() - t).toString() + "ms";
+    log("verbose", "answerCallbackQuery(id=%j): %s ok %j", id, d, r);
+    return r;
+}
+
+async function clearReplyMarkup(chat: number, msg: number): Promise<boolean> {
+    const t = Date.now();
+    let r: TelegramBotAPI.Message | boolean;
+    try {
+        r = await api.editMessageReplyMarkup(
+            { inline_keyboard: [] },
+            { chat_id: chat, message_id: msg },
+        );
+    } catch (e) {
+        const d = (Date.now() - t).toString() + "ms";
+        log("warn", "clearReplyMarkup(chat=%j, msg=%j): %s err %s", chat, msg, d, e);
+        return false;
+    }
+    const d = (Date.now() - t).toString() + "ms";
+    log("verbose", "clearReplyMarkup(chat=%j, msg=%j): %s ok %j", chat, msg, d, r);
+    return true;
+}
+
 
 async function getChatMember(chat: number, user: number): Promise<TelegramBotAPI.ChatMember | undefined> {
     const t = Date.now();
@@ -275,6 +309,8 @@ export = {
     allowAllMessages,
     ban,
     unban,
+    answerCallbackQuery,
+    clearReplyMarkup,
     getChatMember,
     leaveChat,
 }
