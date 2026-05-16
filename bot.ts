@@ -59,7 +59,7 @@ async function init(): Promise<void> {
         polling: {
             autoStart: false,
             params: {
-                allowed_updates: ["message", "callback_query"],
+                allowed_updates: ["message", "callback_query", "guest_message"],
                 timeout: 50,
             },
         },
