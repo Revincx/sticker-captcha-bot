@@ -68,6 +68,7 @@ async function init(): Promise<void> {
             timeout: config.get("timeout"),
             proxy: config.get("proxy"),
         },
+        baseApiUrl: config.get<string | undefined>("API_BASE_URL", undefined),
     });
     try {
         me = await api.getMe();
