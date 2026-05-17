@@ -30,6 +30,11 @@ async function sleep(time: number): Promise<void> {
         g.handleMessage(m).catch(() => undefined);
     });
 
+    api.on("guest_message", (m: TelegramBotAPI.Message) => {
+        const g = Group.get(m.chat.id);
+        g.handleGuestMessage(m).catch(() => undefined);
+    });
+
     api.on("callback_query", (q: TelegramBotAPI.CallbackQuery) => {
         const chatId = q.message?.chat.id;
         if (chatId === undefined) {
