@@ -52,12 +52,19 @@ class Group {
         if (await this.handleServiceMessage(m)) {
             return;
         }
+        if (await this.handleGuestBotMessage(m)) {
+            return;
+        }
         if (await this.handleVerification(m)) {
             return;
         }
         if (await this.handleCommand(m)) {
             return;
         }
+    }
+
+    public async handleGuestMessage(m: TelegramBot.Message): Promise<void> {
+        await this.handleGuestBotMessage(m);
     }
 
     public async handleCallbackQuery(q: TelegramBot.CallbackQuery): Promise<void> {
@@ -93,6 +100,21 @@ class Group {
         }
         await bot.answerCallbackQuery(q.id, await this.format("callback.ban"));
         await this.onBanByAdmin(targetUser);
+    }
+
+    private async handleGuestBotMessage(m: TelegramBot.Message): Promise<boolean> {
+        const caller = m.guest_bot_caller_user;
+        if (caller === undefined) {
+            return false;
+        }
+        if (!await this.existsKey(`user:${caller.id}:pending`)) {
+            return false;
+        }
+        npmlog.info("group", "(group=%j).handleGuestBotMessage(msg=%j, caller=%j, bot=%j) deleting guest bot message from unverified user",
+            this.id, m.message_id, caller.id, m.from?.id);
+        await this.delMsg(m.message_id);
+        await this.trackPendingMessage(caller.id, m.message_id);
+        return true;
     }
 
     private async handleVerification(m: TelegramBot.Message): Promise<boolean> {
